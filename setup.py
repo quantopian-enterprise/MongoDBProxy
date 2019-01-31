@@ -29,6 +29,6 @@ setup(
     classifiers=[
         'License :: OSI Approved :: Apache Software License',
     ],
-    install_requires=['pymongo'],
+    install_requires=['pymongo>=3.6'],
     url="https://github.com/arngarden/MongoDBProxy"
 )
