@@ -16,6 +16,11 @@ Copyright 2013 Gustav Arngarden
 
 import time
 import pymongo
+import pymongo.collection
+import pymongo.database
+
+
+NoneType = type(None)  # not available under types modules in py3
 
 
 def get_methods(*objs):
@@ -23,20 +28,51 @@ def get_methods(*objs):
         attr
         for obj in objs
         for attr in dir(obj)
-        if not attr.startswith('_') and hasattr(getattr(obj, attr), '__call__')
+        if obj is not NoneType and
+        not attr.startswith('_') and hasattr(getattr(obj, attr), '__call__')
     )
 
 
 try:
-    # will fail to import from older versions of pymongo
+    # newer pymongo:
     from pymongo import MongoClient, MongoReplicaSetClient
-except ImportError:
-    MongoClient, MongoReplicaSetClient = None, None
+    Connection, ReplicaSetConnection = NoneType, NoneType
 
-try:
-    from pymongo import Connection, ReplicaSetConnection
+    def _get_client(obj):
+        if isinstance(obj, pymongo.collection.Collection):
+            return obj.database.client
+        elif isinstance(obj, pymongo.database.Database):
+            return obj.client
+        elif isinstance(obj, (MongoClient, MongoReplicaSetClient)):
+            return obj
+        else:
+            return None
+
+    def _get_disconnect(obj):
+        client = _get_client(obj)
+        if client:
+            return client.close
+
 except ImportError:
-    Connection, ReplicaSetConnection = None, None
+    # older pymongo
+    from pymongo import Connection, ReplicaSetConnection
+    MongoClient, MongoReplicaSetClient = NoneType, NoneType
+
+    def _get_conn(obj):
+        if isinstance(obj, pymongo.collection.Collection):
+            return obj.database.connection
+        elif isinstance(obj, pymongo.database.Database):
+            return obj.connection
+        elif isinstance(obj, (Connection, ReplicaSetConnection)):
+            return obj
+        else:
+            return None
+
+    def _get_disconnect(obj):
+        conn = _get_conn(obj)
+        if conn:
+            return conn.disconnect
+
 
 EXECUTABLE_MONGO_METHODS = get_methods(pymongo.collection.Collection,
                                        pymongo.database.Database,
@@ -44,18 +80,6 @@ EXECUTABLE_MONGO_METHODS = get_methods(pymongo.collection.Collection,
                                        ReplicaSetConnection,
                                        MongoClient, MongoReplicaSetClient,
                                        pymongo)
-
-
-def get_connection(obj):
-    if isinstance(obj, pymongo.collection.Collection):
-        return obj.database.connection
-    elif isinstance(obj, pymongo.database.Database):
-        return obj.connection
-    elif isinstance(obj, (Connection, ReplicaSetConnection,
-                          MongoClient, MongoReplicaSetClient)):
-        return obj
-    else:
-        return None
 
 
 class Executable(object):
@@ -92,9 +116,9 @@ class Executable(object):
                 if delta >= max_time:
                     if not self.disconnect_on_timeout or disconnected:
                         break
-                    conn = get_connection(self.method.__self__)
-                    if conn:
-                        conn.disconnect()
+                    disconnect = _get_disconnect(self.method.__self__)
+                    if disconnect:
+                        disconnect()
                         disconnected = True
                         max_time *= 2
                         round = 2
